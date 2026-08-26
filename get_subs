@@ -1,0 +1,92 @@
+#!/bin/bash
+
+set -euo pipefail
+
+# Follow every symbolic link in the launcher path so a global command such as
+# /opt/homebrew/bin/get_subs still finds the project-local Python environment.
+SOURCE_PATH="${BASH_SOURCE[0]}"
+while [ -L "$SOURCE_PATH" ]; do
+    SOURCE_DIR="$(CDPATH= cd -- "$(dirname -- "$SOURCE_PATH")" && pwd -P)"
+    LINK_TARGET="$(readlink "$SOURCE_PATH")"
+    if [[ "$LINK_TARGET" = /* ]]; then
+        SOURCE_PATH="$LINK_TARGET"
+    else
+        SOURCE_PATH="$SOURCE_DIR/$LINK_TARGET"
+    fi
+done
+
+PROJECT_DIR="$(CDPATH= cd -- "$(dirname -- "$SOURCE_PATH")" && pwd -P)"
+VENV_DIR="${GET_SUBS_VENV:-$PROJECT_DIR/.venv}"
+REQUIREMENTS_FILE="$PROJECT_DIR/requirements.txt"
+REQUIREMENTS_STAMP="$VENV_DIR/.get_subs-requirements.sha256"
+
+# Print bootstrap events before the richer Python status reporter is available.
+# The timestamp makes long first-run dependency installations easier to audit.
+bootstrap_status() {
+    printf '[%s] [BOOTSTRAP] %s\n' "$(date '+%H:%M:%S')" "$*"
+}
+
+# Return success only for Python versions declared compatible by qwen-asr.
+# Python 3.9 through 3.13 are accepted; newer interpreters are deliberately
+# rejected until the upstream project advertises and tests their support.
+is_supported_python() {
+    "$1" -c 'import sys; raise SystemExit(0 if (3, 9) <= sys.version_info[:2] <= (3, 13) else 1)' \
+        >/dev/null 2>&1
+}
+
+# Select the newest compatible local interpreter without modifying the user's
+# global Python installation. The macOS system Python is included as a final
+# candidate because it is a supported 3.9 runtime on this workstation.
+select_bootstrap_python() {
+    local candidate
+    for candidate in python3.13 python3.12 python3.11 python3.10 python3.9 /usr/bin/python3 python3; do
+        if command -v "$candidate" >/dev/null 2>&1 && is_supported_python "$candidate"; then
+            command -v "$candidate"
+            return 0
+        fi
+    done
+
+    return 1
+}
+
+# Calculate a stable requirements fingerprint so subsequent invocations skip
+# package resolution unless this repository's dependency contract has changed.
+requirements_fingerprint() {
+    if command -v shasum >/dev/null 2>&1; then
+        shasum -a 256 "$REQUIREMENTS_FILE" | awk '{print $1}'
+    else
+        cksum "$REQUIREMENTS_FILE" | awk '{print $1 ":" $2}'
+    fi
+}
+
+if [ ! -x "$VENV_DIR/bin/python" ]; then
+    if ! BOOTSTRAP_PYTHON="$(select_bootstrap_python)"; then
+        printf '%s\n' \
+            'get_subs requires Python 3.9-3.13. Install Python 3.12, then run this command again.' \
+            >&2
+        exit 2
+    fi
+
+    bootstrap_status "Creating isolated environment with $($BOOTSTRAP_PYTHON --version 2>&1)..."
+    "$BOOTSTRAP_PYTHON" -m venv "$VENV_DIR"
+fi
+
+CURRENT_FINGERPRINT="$(requirements_fingerprint)"
+INSTALLED_FINGERPRINT=""
+if [ -f "$REQUIREMENTS_STAMP" ]; then
+    INSTALLED_FINGERPRINT="$(tr -d '[:space:]' < "$REQUIREMENTS_STAMP")"
+fi
+
+if [ "$CURRENT_FINGERPRINT" != "$INSTALLED_FINGERPRINT" ]; then
+    bootstrap_status 'Installing the pinned Qwen3-ASR runtime (first run can take several minutes)...'
+    "$VENV_DIR/bin/python" -m pip install --upgrade pip
+    "$VENV_DIR/bin/python" -m pip install --requirement "$REQUIREMENTS_FILE"
+    printf '%s\n' "$CURRENT_FINGERPRINT" > "$REQUIREMENTS_STAMP"
+    bootstrap_status 'Runtime installation complete.'
+fi
+
+export PYTHONUNBUFFERED=1
+export TOKENIZERS_PARALLELISM=true
+export PYTORCH_ENABLE_MPS_FALLBACK=1
+
+exec "$VENV_DIR/bin/python" -u "$PROJECT_DIR/get_subs.py" "$@"

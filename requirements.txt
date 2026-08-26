@@ -1,0 +1,9 @@
+# The official Qwen runtime currently pins its compatible Transformers release.
+qwen-asr==0.0.6
+
+# Qwen imports PyTorch directly but does not declare it as a package dependency.
+# This release has native Apple Silicon wheels and supports MPS acceleration.
+torch==2.8.0
+
+# Pin the cache/download API used for explicit first-run model provisioning.
+huggingface-hub==0.36.0
