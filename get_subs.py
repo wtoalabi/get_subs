@@ -325,6 +325,13 @@ def parse_arguments(argv: Optional[Sequence[str]] = None) -> argparse.Namespace:
         help="Maximum caption characters before a cue split (default: 84).",
     )
     parser.add_argument(
+        "--max-new-tokens",
+        type=int,
+        default=1024,
+        metavar="COUNT",
+        help="Maximum ASR decoder tokens per chunk (default: 1024).",
+    )
+    parser.add_argument(
         "--overwrite",
         action="store_true",
         help="Regenerate completed SRT files; partial checkpoints always resume.",
@@ -356,6 +363,8 @@ def parse_arguments(argv: Optional[Sequence[str]] = None) -> argparse.Namespace:
         parser.error("--max-cue-seconds must be between 1 and 15")
     if not 20 <= args.max_cue_chars <= 200:
         parser.error("--max-cue-chars must be between 20 and 200")
+    if not 128 <= args.max_new_tokens <= 4096:
+        parser.error("--max-new-tokens must be between 128 and 4096")
     if args.status_interval < 2.0:
         parser.error("--status-interval must be at least 2 seconds")
 
@@ -920,6 +929,7 @@ def load_qwen_pipeline(
     asr_path: Path,
     aligner_path: Path,
     requested_device: str,
+    max_new_tokens: int,
     status_interval: float,
     console: Console,
 ) -> tuple[Any, Any, str]:
@@ -953,7 +963,7 @@ def load_qwen_pipeline(
             forced_aligner=str(aligner_path),
             forced_aligner_kwargs=dict(model_kwargs),
             max_inference_batch_size=1,
-            max_new_tokens=2048,
+            max_new_tokens=max_new_tokens,
             **model_kwargs,
         )
     model.model.eval()
@@ -1427,6 +1437,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
             asr_path,
             aligner_path,
             args.device,
+            args.max_new_tokens,
             args.status_interval,
             console,
         )

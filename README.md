@@ -76,6 +76,9 @@ get_subs "/path/to/videos" --overwrite
 # Choose a device explicitly (auto prefers CUDA, then Apple MPS, then CPU).
 get_subs "/path/to/videos" --device mps
 
+# Cap decoder work for an especially slow/fast-speech workload.
+get_subs "/path/to/videos" --max-new-tokens 1024
+
 # See every tuning option.
 get_subs --help
 ```
@@ -106,6 +109,11 @@ boundaries, and live update frequency. Automatic device selection prefers CUDA,
 then Apple MPS, then CPU; GPU or MPS acceleration is strongly recommended. The
 portable Transformers backend is used because timestamp generation requires the
 forced aligner alongside ASR.
+
+`--max-new-tokens` limits how much text Qwen may decode for one chunk. The
+default 1,024 tokens covers ordinary 90-second speech while bounding inference
+time; raise it for unusually dense or very fast speech, or lower it when
+latency matters more than completeness.
 
 The forced aligner officially supports Chinese, English, Cantonese, French,
 German, Italian, Japanese, Korean, Portuguese, Russian, and Spanish. ASR covers
