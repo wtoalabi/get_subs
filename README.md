@@ -80,6 +80,27 @@ get_subs "/path/to/videos" --device mps
 get_subs --help
 ```
 
+### What `--context` means
+
+`--context` is an optional recognition hint sent to Qwen as the prompt context
+for every audio chunk. Use it for proper nouns, product names, acronyms, or
+specialist vocabulary that the speaker is likely to say. It can improve how
+the ASR model spells those terms; the forced aligner then timestamps the text
+that ASR produced.
+
+For example:
+
+```bash
+get_subs "/path/to/videos" \
+  --context "Names: Ada Lovelace, Grace Hopper. Terms: Kubernetes, PostgreSQL."
+```
+
+The value is not inserted into the subtitles, is not a glossary or guaranteed
+spelling replacement, and does not select a language. Keep it short and relevant
+to the videos. Use `--language English` separately when the spoken language is
+known. The same context is applied to each chunk, including chunks created when
+the program resumes from a checkpoint.
+
 The default 90-second chunks balance accelerator memory, recognition quality at
 boundaries, and live update frequency. Automatic device selection prefers CUDA,
 then Apple MPS, then CPU; GPU or MPS acceleration is strongly recommended. The
