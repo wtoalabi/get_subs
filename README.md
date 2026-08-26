@@ -10,21 +10,32 @@ get_subs "/path/to/videos"
 The scan includes every nested directory, including directories literally named
 `subs`. A video at `course/subs/1.mkv` produces `course/subs/1.srt`.
 
+## Installation
+
+Requirements:
+
+- Python 3.9 through 3.13
+- `ffmpeg` and `ffprobe`
+- Enough disk space and memory for both Qwen models
+
+Clone the repository, then expose its launcher from a directory on your `PATH`.
+For example:
+
+```bash
+mkdir -p "$HOME/.local/bin"
+ln -s "$(pwd)/get_subs" "$HOME/.local/bin/get_subs"
+```
+
+If necessary, add `$HOME/.local/bin` to your shell's `PATH`. FFmpeg is available
+from common package managers such as Homebrew (`brew install ffmpeg`) and APT
+(`sudo apt install ffmpeg`).
+
 ## First run
 
 The launcher creates an isolated `.venv`, installs the pinned official runtime,
 then checks both model snapshots. Missing models are downloaded into
 `~/.cache/get_subs/huggingface` before video discovery begins. Dependency and
 model downloads happen once and are reused by later invocations.
-
-This checkout is exposed globally through:
-
-```text
-/opt/homebrew/bin/get_subs -> /Users/mac/dev/python/get_subs/get_subs
-```
-
-`ffmpeg` and `ffprobe` must already be available. They are present on the target
-Mac; another Homebrew-based Mac can install them with `brew install ffmpeg`.
 
 ## What happens during a run
 
@@ -57,7 +68,7 @@ MTS, M2TS, M2V, MXF, TS, WMV, FLV/F4V, OGV, VOB, ASF, DivX, RM/RMVB, 3GP, and
 get_subs "/path/to/videos" --language English
 
 # Bias names or specialist vocabulary without forcing a language.
-get_subs "/path/to/videos" --context "StoreX, OSUK, Revolut"
+get_subs "/path/to/videos" --context "Acme Corp, PostgreSQL, Kubernetes"
 
 # Regenerate SRT files that are already complete.
 get_subs "/path/to/videos" --overwrite
@@ -69,11 +80,11 @@ get_subs "/path/to/videos" --device mps
 get_subs --help
 ```
 
-The default 90-second chunks are a deliberate balance for the target M2 with
-16 GB unified memory: FP16 MPS inference keeps both required models resident,
-silence-aware boundaries protect recognition quality, and each chunk publishes
-useful SRT output promptly. No vLLM dependency is installed because vLLM is a
-CUDA-oriented path and does not accelerate this Apple Silicon host.
+The default 90-second chunks balance accelerator memory, recognition quality at
+boundaries, and live update frequency. Automatic device selection prefers CUDA,
+then Apple MPS, then CPU; GPU or MPS acceleration is strongly recommended. The
+portable Transformers backend is used because timestamp generation requires the
+forced aligner alongside ASR.
 
 The forced aligner officially supports Chinese, English, Cantonese, French,
 German, Italian, Japanese, Korean, Portuguese, Russian, and Spanish. ASR covers
