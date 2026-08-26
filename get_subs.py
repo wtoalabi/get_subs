@@ -1123,10 +1123,16 @@ def model_repositories(
     requested_device: str,
     cache_dir: Path,
 ) -> tuple[str, str, bool]:
-    """Choose cached official weights before provisioning optional MLX conversions."""
+    """Prefer a complete MLX pair, then cached official weights, before downloading."""
 
     use_mlx = prefer_mlx_backend(requested_device)
     if use_mlx:
+        optimized_cached = all(
+            cached_model_snapshot(repository, cache_dir) is not None
+            for repository in (MLX_ASR_REPOSITORY, MLX_ALIGNER_REPOSITORY)
+        )
+        if optimized_cached:
+            return MLX_ASR_REPOSITORY, MLX_ALIGNER_REPOSITORY, True
         official_cached = all(
             cached_model_snapshot(repository, cache_dir) is not None
             for repository in (ASR_REPOSITORY, ALIGNER_REPOSITORY)
