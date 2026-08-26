@@ -1,5 +1,6 @@
 .DS_Store
 .venv/
+.venv.unsupported-*/
 __pycache__/
 *.py[cod]
 *.log
