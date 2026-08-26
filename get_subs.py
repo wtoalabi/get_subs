@@ -804,14 +804,35 @@ def load_checkpoint(path: Path) -> Optional[dict[str, Any]]:
     return payload
 
 
-def checkpoint_matches(payload: dict[str, Any], video: VideoInfo) -> bool:
-    """Confirm checkpoint schema and exact source identity before resuming."""
+def checkpoint_settings(args: argparse.Namespace) -> dict[str, Any]:
+    """Return output-affecting options that must remain stable across resume."""
+
+    return {
+        "language": args.language,
+        "context": args.context,
+        "chunk_seconds": args.chunk_seconds,
+        "overlap_seconds": args.overlap_seconds,
+        "silence_db": args.silence_db,
+        "silence_duration": args.silence_duration,
+        "max_cue_seconds": args.max_cue_seconds,
+        "max_cue_chars": args.max_cue_chars,
+        "max_new_tokens": args.max_new_tokens,
+    }
+
+
+def checkpoint_matches(
+    payload: dict[str, Any],
+    video: VideoInfo,
+    args: argparse.Namespace,
+) -> bool:
+    """Confirm schema, source identity, and output settings before resuming."""
 
     return (
         payload.get("version") == CHECKPOINT_VERSION
         and payload.get("source") == source_fingerprint(video)
         and isinstance(payload.get("segments"), list)
         and isinstance(payload.get("cues"), list)
+        and payload.get("settings") == checkpoint_settings(args)
     )
 
 
@@ -1211,6 +1232,7 @@ def make_checkpoint_payload(
     next_segment: int,
     cues: Sequence[SubtitleCue],
     languages: Sequence[str],
+    settings: dict[str, Any],
 ) -> dict[str, Any]:
     """Create the complete durable state required for interruption-safe resume."""
 
@@ -1221,6 +1243,7 @@ def make_checkpoint_payload(
         "next_segment": next_segment,
         "cues": [serialize_cue(cue) for cue in cues],
         "languages": list(languages),
+        "settings": settings,
         "updated_at": dt.datetime.now(dt.timezone.utc).isoformat(),
     }
 
@@ -1244,7 +1267,7 @@ def transcribe_video(
         console.info(f"Skipping completed output: {video.output_path}")
         return "skipped", 0
 
-    if saved_state is not None and checkpoint_matches(saved_state, video):
+    if saved_state is not None and checkpoint_matches(saved_state, video, args):
         segments = [deserialize_segment(item) for item in saved_state["segments"]]
         next_segment = int(saved_state.get("next_segment", 0))
         cues = [deserialize_cue(item) for item in saved_state["cues"]]
@@ -1279,7 +1302,14 @@ def transcribe_video(
         next_segment = 0
         cues: list[SubtitleCue] = []
         languages: list[str] = []
-        initial_state = make_checkpoint_payload(video, segments, 0, cues, languages)
+        initial_state = make_checkpoint_payload(
+            video,
+            segments,
+            0,
+            cues,
+            languages,
+            checkpoint_settings(args),
+        )
         save_checkpoint(state_path, initial_state)
         write_srt(video.output_path, cues)
         console.info(
@@ -1349,6 +1379,7 @@ def transcribe_video(
                 next_segment,
                 cues,
                 languages,
+                checkpoint_settings(args),
             )
             save_checkpoint(state_path, checkpoint)
             write_srt(video.output_path, cues)
