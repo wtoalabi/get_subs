@@ -265,7 +265,11 @@ def parse_arguments(argv: Optional[Sequence[str]] = None) -> argparse.Namespace:
             "and Qwen3-ForcedAligner-0.6B."
         ),
     )
-    parser.add_argument("directory", type=Path, help="Directory to scan recursively for videos.")
+    parser.add_argument(
+        "directory",
+        type=Path,
+        help="Directory to scan recursively, or one video file to process.",
+    )
     parser.add_argument(
         "--language",
         default=None,
@@ -408,17 +412,25 @@ def command_path(name: str) -> Path:
     return Path(resolved)
 
 
-def validate_directory(path: Path) -> Path:
-    """Resolve and validate the user-supplied recursive scan root."""
+def validate_input(path: Path) -> Path:
+    """Resolve a directory or supported video file supplied by the user."""
 
     expanded = path.expanduser()
     try:
         resolved = expanded.resolve(strict=True)
     except FileNotFoundError as exc:
         raise RuntimeError(f"Directory does not exist: {expanded}") from exc
-    if not resolved.is_dir():
-        raise RuntimeError(f"Path is not a directory: {resolved}")
-    return resolved
+    if resolved.is_dir():
+        return resolved
+    if resolved.is_file() and resolved.suffix.casefold() in VIDEO_EXTENSIONS:
+        return resolved
+    if resolved.is_file():
+        supported = ", ".join(sorted(VIDEO_EXTENSIONS))
+        raise RuntimeError(
+            f"Unsupported video extension for {resolved.name}. "
+            f"Supported extensions: {supported}"
+        )
+    raise RuntimeError(f"Path is not a directory or supported video file: {resolved}")
 
 
 def snapshot_size(path: Path) -> int:
@@ -483,7 +495,10 @@ def ensure_model_snapshot(repo_id: str, cache_dir: Path, console: Console) -> Pa
 
 
 def discover_videos(root: Path) -> list[Path]:
-    """Find supported videos recursively, including every directory named subs."""
+    """Find supported videos recursively or return one supported file unchanged."""
+
+    if root.is_file():
+        return [root]
 
     discovered: list[Path] = []
     for candidate in root.rglob("*"):
@@ -1418,14 +1433,15 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     run_started = time.monotonic()
     try:
         console.pass_start(1, "Preflight", "validating input, FFmpeg, cache, and disk")
-        root = validate_directory(args.directory)
+        root = validate_input(args.directory)
         ffmpeg = command_path("ffmpeg")
         ffprobe = command_path("ffprobe")
         cache_dir = args.model_cache.expanduser().resolve()
         cache_dir.mkdir(parents=True, exist_ok=True)
         free_bytes = shutil.disk_usage(cache_dir).free
+        input_kind = "file" if root.is_file() else "directory"
         console.info(
-            f"Input {root} • FFmpeg {ffmpeg} • cache {cache_dir} • "
+            f"Input {root} ({input_kind}) • FFmpeg {ffmpeg} • cache {cache_dir} • "
             f"free disk {format_bytes(free_bytes)}"
         )
         if free_bytes < 12 * 1024**3:
@@ -1453,8 +1469,9 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
                 console.warning(f"Skipping {path}: {exc}")
                 continue
             videos.append(video)
+            display_path = path.name if root.is_file() else path.relative_to(root)
             console.info(
-                f"Probed {index}/{len(paths)} • {path.relative_to(root)} • "
+                f"Probed {index}/{len(paths)} • {display_path} • "
                 f"{format_duration(video.duration)} • {video.audio_codec}"
             )
         if not videos:
@@ -1484,8 +1501,9 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         failed: list[tuple[Path, str]] = []
 
         for index, video in enumerate(videos, start=1):
+            display_path = video.path.name if root.is_file() else video.path.relative_to(root)
             console.info(
-                f"Video {index}/{len(videos)} • {video.path.relative_to(root)} • "
+                f"Video {index}/{len(videos)} • {display_path} • "
                 f"{format_duration(video.duration)}"
             )
 

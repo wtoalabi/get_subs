@@ -9,6 +9,8 @@ get_subs "/path/to/videos"
 
 The scan includes every nested directory, including directories literally named
 `subs`. A video at `course/subs/1.mkv` produces `course/subs/1.srt`.
+You can also pass one video file directly, for example `get_subs "/path/to/4.mp4"`;
+its subtitle is written beside it as `4.srt`.
 
 ## Installation
 
