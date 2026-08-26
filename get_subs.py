@@ -1178,8 +1178,9 @@ def load_mlx_pipeline(
     max_new_tokens: int,
     status_interval: float,
     console: Console,
+    quantized: bool,
 ) -> tuple[Any, Optional[Any], str]:
-    """Load quantized native MLX Qwen models for fast Apple-Silicon inference."""
+    """Load native MLX Qwen models for fast Apple-Silicon inference."""
 
     try:
         from mlx_qwen3_asr import ForcedAligner, Session
@@ -1196,7 +1197,8 @@ def load_mlx_pipeline(
         ensure_loaded = getattr(forced_aligner, "_ensure_loaded", None)
         if callable(ensure_loaded):
             ensure_loaded()
-    console.success("Qwen3-ASR + ForcedAligner loaded with native MLX (8-bit)")
+    variant = "8-bit converted" if quantized else "official cached"
+    console.success(f"Qwen3-ASR + ForcedAligner loaded with native MLX ({variant})")
     return MlxPipeline(session, forced_aligner, max_new_tokens), None, "mlx"
 
 
@@ -1745,6 +1747,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
                 args.max_new_tokens,
                 args.status_interval,
                 console,
+                asr_repository == MLX_ASR_REPOSITORY,
             )
         else:
             model, torch_module, device_map = load_qwen_pipeline(
