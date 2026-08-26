@@ -462,6 +462,31 @@ def snapshot_size(path: Path) -> int:
     return total
 
 
+def model_snapshot_complete(path: Path) -> bool:
+    """Verify that a cached snapshot contains its configuration and all weights."""
+
+    if not path.is_dir() or not (path / "config.json").is_file():
+        return False
+    index_path = path / "model.safetensors.index.json"
+    if index_path.is_file():
+        try:
+            index_payload = json.loads(index_path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            return False
+        weight_map = index_payload.get("weight_map")
+        if not isinstance(weight_map, dict):
+            return False
+        weight_names = {str(name) for name in weight_map.values()}
+    else:
+        weight_names = {"model.safetensors"}
+    if not weight_names:
+        return False
+    return all(
+        (path / weight_name).is_file() and (path / weight_name).stat().st_size > 0
+        for weight_name in weight_names
+    )
+
+
 def ensure_model_snapshot(repo_id: str, cache_dir: Path, console: Console) -> Path:
     """Return a complete local model snapshot, downloading it when absent."""
 
@@ -481,10 +506,14 @@ def ensure_model_snapshot(repo_id: str, cache_dir: Path, console: Console) -> Pa
             local_files_only=True,
         )
         resolved = Path(local_path).resolve()
-        console.success(
-            f"Model ready: {repo_id} ({format_bytes(snapshot_size(resolved))}, cached)"
+        if model_snapshot_complete(resolved):
+            console.success(
+                f"Model ready: {repo_id} ({format_bytes(snapshot_size(resolved))}, cached)"
+            )
+            return resolved
+        console.warning(
+            f"Cached snapshot for {repo_id} is incomplete; resuming its weight download."
         )
-        return resolved
     except LocalEntryNotFoundError:
         pass
 
@@ -499,6 +528,10 @@ def ensure_model_snapshot(repo_id: str, cache_dir: Path, console: Console) -> Pa
         max_workers=min(8, max(2, os.cpu_count() or 2)),
     )
     resolved = Path(local_path).resolve()
+    if not model_snapshot_complete(resolved):
+        raise RuntimeError(
+            f"Hugging Face returned an incomplete model snapshot for {repo_id}: {resolved}"
+        )
     console.success(
         f"Downloaded {repo_id} ({format_bytes(snapshot_size(resolved))}) in "
         f"{format_duration(time.monotonic() - started)}"
