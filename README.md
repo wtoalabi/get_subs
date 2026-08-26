@@ -110,6 +110,10 @@ then Apple MPS, then CPU; GPU or MPS acceleration is strongly recommended. The
 portable Transformers backend is used because timestamp generation requires the
 forced aligner alongside ASR.
 
+On Apple MPS, the launcher selects eager attention and PyTorch's Metal matmul
+path for compatibility and speed. CUDA uses SDPA, or FlashAttention when it is
+already installed.
+
 `--max-new-tokens` limits how much text Qwen may decode for one chunk. The
 default 512 tokens covers ordinary 90-second speech while bounding inference
 time; raise it for unusually dense or very fast speech, or lower it when

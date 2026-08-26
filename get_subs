@@ -106,5 +106,6 @@ fi
 export PYTHONUNBUFFERED=1
 export TOKENIZERS_PARALLELISM=true
 export PYTORCH_ENABLE_MPS_FALLBACK=1
+export PYTORCH_MPS_PREFER_METAL=1
 
 exec "$VENV_DIR/bin/python" -u "$PROJECT_DIR/get_subs.py" "$@"

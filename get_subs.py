@@ -944,7 +944,10 @@ def load_qwen_pipeline(
         ) from exc
 
     device_map, dtype, device_label = resolve_device(requested_device, torch)
-    attention = "sdpa"
+    # MPS SDPA currently falls back for parts of this model on some macOS /
+    # PyTorch combinations. Eager attention keeps matrix multiplies on Metal;
+    # CUDA still uses SDPA or FlashAttention when available.
+    attention = "eager" if device_map == "mps" else "sdpa"
     if device_map.startswith("cuda") and importlib.util.find_spec("flash_attn") is not None:
         attention = "flash_attention_2"
     console.info(
