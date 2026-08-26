@@ -14,7 +14,7 @@ The scan includes every nested directory, including directories literally named
 
 Requirements:
 
-- Python 3.9 through 3.13
+- Python 3.10 through 3.13
 - `ffmpeg` and `ffprobe`
 - Enough disk space and memory for both Qwen models
 

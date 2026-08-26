@@ -26,20 +26,29 @@ bootstrap_status() {
     printf '[%s] [BOOTSTRAP] %s\n' "$(date '+%H:%M:%S')" "$*"
 }
 
-# Return success only for Python versions declared compatible by qwen-asr.
-# Python 3.9 through 3.13 are accepted; newer interpreters are deliberately
-# rejected until the upstream project advertises and tests their support.
+# Return success only for Python versions compatible with the complete Qwen
+# dependency set. The current accelerate release requires Python 3.10+, while
+# newer interpreters are deliberately rejected until upstream tests them.
 is_supported_python() {
-    "$1" -c 'import sys; raise SystemExit(0 if (3, 9) <= sys.version_info[:2] <= (3, 13) else 1)' \
+    "$1" -c 'import sys; raise SystemExit(0 if (3, 10) <= sys.version_info[:2] <= (3, 13) else 1)' \
         >/dev/null 2>&1
 }
 
 # Select the newest compatible local interpreter without modifying the user's
-# global Python installation. The macOS system Python is included as a final
-# candidate because it is a supported 3.9 runtime on this workstation.
+# global Python installation. Keg-only Homebrew versioned interpreters are
+# listed explicitly so they work even when their bin directory is not on PATH.
 select_bootstrap_python() {
     local candidate
-    for candidate in python3.13 python3.12 python3.11 python3.10 python3.9 /usr/bin/python3 python3; do
+    for candidate in \
+        /opt/homebrew/opt/python@3.13/bin/python3.13 \
+        /opt/homebrew/opt/python@3.12/bin/python3.12 \
+        /opt/homebrew/opt/python@3.11/bin/python3.11 \
+        /opt/homebrew/opt/python@3.10/bin/python3.10 \
+        /usr/local/opt/python@3.13/bin/python3.13 \
+        /usr/local/opt/python@3.12/bin/python3.12 \
+        /usr/local/opt/python@3.11/bin/python3.11 \
+        /usr/local/opt/python@3.10/bin/python3.10 \
+        python3.13 python3.12 python3.11 python3.10; do
         if command -v "$candidate" >/dev/null 2>&1 && is_supported_python "$candidate"; then
             command -v "$candidate"
             return 0
@@ -59,10 +68,19 @@ requirements_fingerprint() {
     fi
 }
 
+# Move an environment created with an incompatible interpreter aside instead
+# of deleting it. This preserves diagnostics and lets a later supported Python
+# installation bootstrap a clean environment on the next invocation.
+if [ -x "$VENV_DIR/bin/python" ] && ! is_supported_python "$VENV_DIR/bin/python"; then
+    INCOMPATIBLE_VENV="${VENV_DIR}.unsupported-$(date '+%Y%m%d%H%M%S')"
+    bootstrap_status "Existing environment is not Python 3.10-3.13; moving it to $INCOMPATIBLE_VENV"
+    mv "$VENV_DIR" "$INCOMPATIBLE_VENV"
+fi
+
 if [ ! -x "$VENV_DIR/bin/python" ]; then
     if ! BOOTSTRAP_PYTHON="$(select_bootstrap_python)"; then
         printf '%s\n' \
-            'get_subs requires Python 3.9-3.13. Install Python 3.12, then run this command again.' \
+            'get_subs requires Python 3.10-3.13. Install Python 3.12, then run this command again.' \
             >&2
         exit 2
     fi
