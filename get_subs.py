@@ -46,8 +46,10 @@ VIDEO_EXTENSIONS = frozenset(
         ".asf",
         ".avi",
         ".divx",
+        ".f4v",
         ".flv",
         ".m2ts",
+        ".m2v",
         ".m4v",
         ".mkv",
         ".mov",
@@ -55,6 +57,7 @@ VIDEO_EXTENSIONS = frozenset(
         ".mpeg",
         ".mpg",
         ".mts",
+        ".mxf",
         ".ogv",
         ".rm",
         ".rmvb",
@@ -544,10 +547,10 @@ def probe_video(path: Path, ffprobe: Path) -> VideoInfo:
 def validate_output_collisions(videos: Sequence[VideoInfo]) -> None:
     """Prevent two differently formatted videos from overwriting one stem.srt."""
 
-    owners: dict[Path, Path] = {}
+    owners: dict[str, Path] = {}
     collisions: list[str] = []
     for video in videos:
-        key = video.output_path.resolve()
+        key = str(video.output_path.resolve()).casefold()
         previous = owners.get(key)
         if previous is not None and previous != video.path:
             collisions.append(f"{previous} and {video.path} -> {video.output_path}")
@@ -596,7 +599,10 @@ def read_silence_intervals(
     intervals: list[tuple[float, float]] = []
     diagnostics: list[str] = []
     open_start: list[Optional[float]] = [None]
-    silence_pattern = re.compile(r"silence_(start|end):\s*([0-9]+(?:\.[0-9]+)?)")
+    silence_pattern = re.compile(
+        r"silence_(start|end):\s*([-+]?(?:[0-9]+(?:\.[0-9]*)?|\.[0-9]+)(?:e[-+]?[0-9]+)?)",
+        re.IGNORECASE,
+    )
 
     def consume_diagnostics() -> None:
         """Parse FFmpeg silence messages while retaining a short failure tail."""
@@ -659,8 +665,13 @@ def build_segments(
     boundaries = [0.0]
     cursor = 0.0
 
-    while duration - cursor > target_seconds * 1.25:
-        ideal = cursor + target_seconds
+    split_threshold = min(target_seconds * 1.25, hard_maximum)
+    while duration - cursor > split_threshold:
+        remaining = duration - cursor
+        ideal_length = target_seconds
+        if remaining - ideal_length < minimum_useful:
+            ideal_length = remaining / 2.0
+        ideal = cursor + ideal_length
         latest = min(duration, cursor + hard_maximum)
         earliest = cursor + minimum_useful
         candidates = [
@@ -1210,7 +1221,7 @@ def transcribe_video(
     args: argparse.Namespace,
     console: Console,
     performance: PerformanceTracker,
-    remaining_run_audio: Callable[[], float],
+    audio_after_video: float,
 ) -> tuple[str, int]:
     """Transcribe one video chunk-by-chunk and publish SRT after every chunk."""
 
@@ -1334,7 +1345,10 @@ def transcribe_video(
             speed = (
                 segment.audio_duration / inference_elapsed if inference_elapsed > 0.0 else 0.0
             )
-            run_eta = performance.estimate(remaining_run_audio())
+            remaining_audio = max(0.0, video.duration - completed_core) + max(
+                0.0, audio_after_video
+            )
+            run_eta = performance.estimate(remaining_audio)
             console.success(
                 f"Chunk {segment.index + 1}/{len(segments)} written • {len(additions)} new / "
                 f"{len(cues)} total cues • video {video_percent:.1f}% • "
@@ -1430,11 +1444,6 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
                 f"{format_duration(video.duration)}"
             )
 
-            def remaining_run_audio() -> float:
-                """Return unprocessed core seconds for the run-wide ETA estimate."""
-
-                return max(0.0, total_audio - completed_audio - performance.audio_seconds)
-
             try:
                 outcome, _ = transcribe_video(
                     video,
@@ -1445,7 +1454,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
                     args,
                     console,
                     performance,
-                    remaining_run_audio,
+                    total_audio - completed_audio - video.duration,
                 )
             except Exception as exc:
                 failed.append((video.path, str(exc)))

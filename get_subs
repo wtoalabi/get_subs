@@ -67,7 +67,7 @@ if [ ! -x "$VENV_DIR/bin/python" ]; then
         exit 2
     fi
 
-    bootstrap_status "Creating isolated environment with $($BOOTSTRAP_PYTHON --version 2>&1)..."
+    bootstrap_status "Creating isolated environment with $("$BOOTSTRAP_PYTHON" --version 2>&1)..."
     "$BOOTSTRAP_PYTHON" -m venv "$VENV_DIR"
 fi
 

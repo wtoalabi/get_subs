@@ -47,8 +47,8 @@ skipped unless `--overwrite` is supplied.
 ## Formats
 
 The recursive extension set includes MP4, MKV, MOV, AVI, WebM, M4V, MPEG, MPG,
-MTS, M2TS, TS, WMV, FLV, OGV, VOB, ASF, DivX, RM/RMVB, 3GP, and 3G2. FFmpeg
-handles the actual container and audio decoding.
+MTS, M2TS, M2V, MXF, TS, WMV, FLV/F4V, OGV, VOB, ASF, DivX, RM/RMVB, 3GP, and
+3G2. FFmpeg handles the actual container and audio decoding.
 
 ## Useful controls
 
