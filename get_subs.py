@@ -1099,11 +1099,40 @@ def prefer_mlx_backend(requested_device: str) -> bool:
     return requested_device in {"auto", "mps"} and mlx_runtime_available()
 
 
-def model_repositories(requested_device: str) -> tuple[str, str, bool]:
-    """Choose official or Apple-optimized Qwen model snapshots for the backend."""
+def cached_model_snapshot(repo_id: str, cache_dir: Path) -> Optional[Path]:
+    """Return a complete local snapshot without initiating any network request."""
+
+    try:
+        from huggingface_hub import snapshot_download
+        from huggingface_hub.errors import LocalEntryNotFoundError
+    except ImportError:
+        return None
+    try:
+        local_path = snapshot_download(
+            repo_id=repo_id,
+            cache_dir=str(cache_dir),
+            local_files_only=True,
+        )
+    except LocalEntryNotFoundError:
+        return None
+    resolved = Path(local_path).resolve()
+    return resolved if model_snapshot_complete(resolved) else None
+
+
+def model_repositories(
+    requested_device: str,
+    cache_dir: Path,
+) -> tuple[str, str, bool]:
+    """Choose cached official weights before provisioning optional MLX conversions."""
 
     use_mlx = prefer_mlx_backend(requested_device)
     if use_mlx:
+        official_cached = all(
+            cached_model_snapshot(repository, cache_dir) is not None
+            for repository in (ASR_REPOSITORY, ALIGNER_REPOSITORY)
+        )
+        if official_cached:
+            return ASR_REPOSITORY, ALIGNER_REPOSITORY, True
         return MLX_ASR_REPOSITORY, MLX_ALIGNER_REPOSITORY, True
     return ASR_REPOSITORY, ALIGNER_REPOSITORY, False
 
@@ -1660,12 +1689,21 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
             )
 
         console.pass_start(2, "Model availability", "checking/downloading both required models")
-        asr_repository, aligner_repository, use_mlx = model_repositories(args.device)
+        asr_repository, aligner_repository, use_mlx = model_repositories(
+            args.device,
+            cache_dir,
+        )
         if use_mlx:
-            console.info(
-                "Apple Silicon detected; using native MLX 8-bit snapshots for "
-                "Qwen3-ASR-1.7B and Qwen3-ForcedAligner-0.6B"
-            )
+            if asr_repository == ASR_REPOSITORY:
+                console.info(
+                    "Apple Silicon detected; reusing cached official Qwen snapshots "
+                    "through native MLX"
+                )
+            else:
+                console.info(
+                    "Apple Silicon detected; using native MLX 8-bit snapshots for "
+                    "Qwen3-ASR-1.7B and Qwen3-ForcedAligner-0.6B"
+                )
         asr_path = ensure_model_snapshot(asr_repository, cache_dir, console)
         aligner_path = ensure_model_snapshot(aligner_repository, cache_dir, console)
 

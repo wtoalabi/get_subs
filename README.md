@@ -118,10 +118,12 @@ default 512 tokens covers ordinary 90-second speech while bounding inference
 time; raise it for unusually dense or very fast speech, or lower it when
 latency matters more than completeness.
 
-On Apple Silicon, the launcher automatically uses native MLX 8-bit conversions
-of those same Qwen3-ASR-1.7B and Qwen3-ForcedAligner-0.6B weights for materially
-better throughput and lower memory use. Other platforms use the official
-Transformers runtime. The forced aligner officially supports Chinese, English,
-Cantonese, French, German, Italian, Japanese, Korean, Portuguese, Russian, and
-Spanish. ASR covers more languages, but timestamp quality outside the aligner's
-supported set is not guaranteed by the model vendor.
+On Apple Silicon, the launcher uses native MLX for materially better throughput
+and lower memory use. It reuses complete official Qwen snapshots already in the
+cache; when those are not present, it downloads compatible 8-bit MLX conversions
+of the same Qwen3-ASR-1.7B and Qwen3-ForcedAligner-0.6B weights. Other platforms
+use the official Transformers runtime. The forced aligner officially supports
+Chinese, English, Cantonese, French, German, Italian, Japanese, Korean,
+Portuguese, Russian, and Spanish. ASR covers more languages, but timestamp
+quality outside the aligner's supported set is not guaranteed by the model
+vendor.
