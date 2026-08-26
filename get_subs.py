@@ -490,6 +490,7 @@ def model_snapshot_complete(path: Path) -> bool:
 def ensure_model_snapshot(repo_id: str, cache_dir: Path, console: Console) -> Path:
     """Return a complete local model snapshot, downloading it when absent."""
 
+    resume_incomplete = False
     try:
         from huggingface_hub import snapshot_download
         from huggingface_hub.errors import LocalEntryNotFoundError
@@ -514,12 +515,18 @@ def ensure_model_snapshot(repo_id: str, cache_dir: Path, console: Console) -> Pa
         console.warning(
             f"Cached snapshot for {repo_id} is incomplete; resuming its weight download."
         )
+        resume_incomplete = True
     except LocalEntryNotFoundError:
         pass
 
-    console.info(
-        f"Model is not installed: {repo_id}. Downloading now; the Hugging Face bars show file ETA."
-    )
+    if resume_incomplete:
+        console.info(
+            f"Resuming model download: {repo_id}. Completed files remain cached for future runs."
+        )
+    else:
+        console.info(
+            f"Model is not installed: {repo_id}. Downloading now; the Hugging Face bars show file ETA."
+        )
     started = time.monotonic()
     local_path = snapshot_download(
         repo_id=repo_id,
