@@ -108,20 +108,20 @@ the program resumes from a checkpoint.
 
 The default 90-second chunks balance accelerator memory, recognition quality at
 boundaries, and live update frequency. Automatic device selection prefers CUDA,
-then Apple MPS, then CPU; GPU or MPS acceleration is strongly recommended. The
-portable Transformers backend is used because timestamp generation requires the
-forced aligner alongside ASR.
-
-On Apple MPS, the launcher selects eager attention and PyTorch's Metal matmul
-path for compatibility and speed. CUDA uses SDPA, or FlashAttention when it is
-already installed.
+then native MLX on Apple Silicon, then the portable CPU path; acceleration is
+strongly recommended. Timestamp generation always runs the dedicated forced
+aligner alongside ASR. CUDA uses SDPA, or FlashAttention when it is already
+installed.
 
 `--max-new-tokens` limits how much text Qwen may decode for one chunk. The
 default 512 tokens covers ordinary 90-second speech while bounding inference
 time; raise it for unusually dense or very fast speech, or lower it when
 latency matters more than completeness.
 
-The forced aligner officially supports Chinese, English, Cantonese, French,
-German, Italian, Japanese, Korean, Portuguese, Russian, and Spanish. ASR covers
-more languages, but timestamp quality outside the aligner's supported set is not
-guaranteed by the model vendor.
+On Apple Silicon, the launcher automatically uses native MLX 8-bit conversions
+of those same Qwen3-ASR-1.7B and Qwen3-ForcedAligner-0.6B weights for materially
+better throughput and lower memory use. Other platforms use the official
+Transformers runtime. The forced aligner officially supports Chinese, English,
+Cantonese, French, German, Italian, Japanese, Korean, Portuguese, Russian, and
+Spanish. ASR covers more languages, but timestamp quality outside the aligner's
+supported set is not guaranteed by the model vendor.

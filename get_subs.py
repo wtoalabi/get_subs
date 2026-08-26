@@ -17,6 +17,7 @@ import importlib.util
 import json
 import math
 import os
+import platform
 import re
 import shutil
 import subprocess
@@ -34,6 +35,8 @@ APP_NAME = "get_subs"
 APP_VERSION = "1.0.0"
 ASR_REPOSITORY = "Qwen/Qwen3-ASR-1.7B"
 ALIGNER_REPOSITORY = "Qwen/Qwen3-ForcedAligner-0.6B"
+MLX_ASR_REPOSITORY = "mlx-community/Qwen3-ASR-1.7B-8bit"
+MLX_ALIGNER_REPOSITORY = "mlx-community/Qwen3-ForcedAligner-0.6B-8bit"
 CHECKPOINT_VERSION = 1
 PASS_COUNT = 6
 DEFAULT_MODEL_CACHE = Path(
@@ -121,6 +124,15 @@ class AlignedToken:
     start: float
     end: float
     fragment: str
+
+
+@dataclasses.dataclass(frozen=True)
+class AlignmentItem:
+    """Normalize timestamp records from either Qwen runtime backend."""
+
+    text: str
+    start_time: float
+    end_time: float
 
 
 @dataclasses.dataclass
@@ -951,10 +963,26 @@ def resolve_device(requested: str, torch_module: Any) -> tuple[str, Any, str]:
     return "cpu", torch_module.float32, "CPU"
 
 
-def clear_accelerator_cache(torch_module: Any, device_map: str) -> None:
+def clear_accelerator_cache(torch_module: Optional[Any], device_map: str) -> None:
     """Release unreferenced tensors after a video or recoverable model failure."""
 
     gc.collect()
+    if torch_module is None and device_map == "mlx":
+        try:
+            import mlx.core as mlx_module
+        except ImportError:
+            return
+        clear_cache = getattr(mlx_module, "clear_cache", None)
+        if callable(clear_cache):
+            clear_cache()
+            return
+        metal = getattr(mlx_module, "metal", None)
+        metal_clear_cache = getattr(metal, "clear_cache", None)
+        if callable(metal_clear_cache):
+            metal_clear_cache()
+        return
+    if torch_module is None:
+        return
     if device_map.startswith("cuda") and torch_module.cuda.is_available():
         torch_module.cuda.empty_cache()
     elif device_map == "mps" and hasattr(torch_module, "mps"):
@@ -1011,6 +1039,121 @@ def load_qwen_pipeline(
     model.forced_aligner.model.eval()
     console.success(f"Qwen3-ASR + ForcedAligner loaded on {device_label}")
     return model, torch, device_map
+
+
+def mlx_runtime_available() -> bool:
+    """Return whether native MLX Qwen inference is available on this host."""
+
+    machine = platform.machine().casefold()
+    return (
+        sys.platform == "darwin"
+        and machine in {"arm64", "aarch64"}
+        and importlib.util.find_spec("mlx") is not None
+        and importlib.util.find_spec("mlx_qwen3_asr") is not None
+    )
+
+
+def prefer_mlx_backend(requested_device: str) -> bool:
+    """Select native MLX for automatic or explicit Apple-Metal execution."""
+
+    return requested_device in {"auto", "mps"} and mlx_runtime_available()
+
+
+def model_repositories(requested_device: str) -> tuple[str, str, bool]:
+    """Choose official or Apple-optimized Qwen model snapshots for the backend."""
+
+    use_mlx = prefer_mlx_backend(requested_device)
+    if use_mlx:
+        return MLX_ASR_REPOSITORY, MLX_ALIGNER_REPOSITORY, True
+    return ASR_REPOSITORY, ALIGNER_REPOSITORY, False
+
+
+class MlxPipeline:
+    """Adapt native MLX Qwen ASR and forced alignment to the CLI pipeline contract."""
+
+    def __init__(
+        self,
+        session: Any,
+        forced_aligner: Any,
+        max_new_tokens: int,
+    ) -> None:
+        """Store loaded MLX components and the decoder ceiling for each chunk."""
+
+        self.session = session
+        self.forced_aligner = forced_aligner
+        self.max_new_tokens = max_new_tokens
+
+    def transcribe(
+        self,
+        audio: str,
+        context: str,
+        language: Optional[str],
+        return_time_stamps: bool,
+    ) -> list[Any]:
+        """Run one audio chunk and return a list matching the official Qwen API."""
+
+        result = self.session.transcribe(
+            audio,
+            context=context,
+            language=language,
+            return_timestamps=return_time_stamps,
+            forced_aligner=self.forced_aligner if return_time_stamps else None,
+            max_new_tokens=self.max_new_tokens,
+        )
+        return [result]
+
+
+def load_mlx_pipeline(
+    asr_path: Path,
+    aligner_path: Path,
+    max_new_tokens: int,
+    status_interval: float,
+    console: Console,
+) -> tuple[Any, Optional[Any], str]:
+    """Load quantized native MLX Qwen models for fast Apple-Silicon inference."""
+
+    try:
+        from mlx_qwen3_asr import ForcedAligner, Session
+    except ImportError as exc:
+        raise RuntimeError(
+            "Native MLX support is unavailable; reinstall the launcher dependencies."
+        ) from exc
+
+    with Heartbeat(console, "Loading native MLX Qwen models", status_interval):
+        session = Session(str(asr_path))
+        forced_aligner = ForcedAligner(str(aligner_path))
+        # The package intentionally lazy-loads the aligner. Calling its stable
+        # internal loader here makes pass 5 account for both model allocations.
+        ensure_loaded = getattr(forced_aligner, "_ensure_loaded", None)
+        if callable(ensure_loaded):
+            ensure_loaded()
+    console.success("Qwen3-ASR + ForcedAligner loaded with native MLX (8-bit)")
+    return MlxPipeline(session, forced_aligner, max_new_tokens), None, "mlx"
+
+
+def transcribe_chunk(
+    model: Any,
+    torch_module: Optional[Any],
+    audio_path: Path,
+    context: str,
+    language: Optional[str],
+) -> Any:
+    """Run one chunk through either the official Torch or native MLX adapter."""
+
+    if torch_module is None:
+        return model.transcribe(
+            audio=str(audio_path),
+            context=context,
+            language=language,
+            return_time_stamps=True,
+        )[0]
+    with torch_module.inference_mode():
+        return model.transcribe(
+            audio=str(audio_path),
+            context=context,
+            language=language,
+            return_time_stamps=True,
+        )[0]
 
 
 def kept_character(character: str) -> bool:
@@ -1230,10 +1373,37 @@ def model_result_to_cues(
     transcript = str(result.text or "").strip()
     if not transcript:
         return []
-    alignment = result.time_stamps
-    if alignment is None:
-        raise RuntimeError("Qwen returned speech text without forced-alignment timestamps")
-    items = list(getattr(alignment, "items", alignment))
+    alignment = getattr(result, "time_stamps", None)
+    if alignment is not None:
+        items = [
+            AlignmentItem(
+                text=str(item.text),
+                start_time=float(item.start_time),
+                end_time=float(item.end_time),
+            )
+            for item in list(getattr(alignment, "items", alignment))
+        ]
+    else:
+        # Native MLX returns forced-aligner records as segment dictionaries,
+        # while the official backend exposes an AlignmentResult.items list.
+        segments = getattr(result, "segments", None)
+        items = []
+        for item in segments or []:
+            if isinstance(item, dict):
+                text = item.get("text", "")
+                start = item.get("start", 0.0)
+                end = item.get("end", 0.0)
+            else:
+                text = getattr(item, "text", "")
+                start = getattr(item, "start_time", getattr(item, "start", 0.0))
+                end = getattr(item, "end_time", getattr(item, "end", 0.0))
+            items.append(
+                AlignmentItem(
+                    text=str(text),
+                    start_time=float(start),
+                    end_time=float(end),
+                )
+            )
     if not items:
         raise RuntimeError("Qwen forced aligner returned no timestamp items for non-empty speech")
     tokens = attach_transcript_fragments(transcript, items, segment.audio_start)
@@ -1367,13 +1537,13 @@ def transcribe_video(
                 args.status_interval,
                 chunk_eta,
             ):
-                with torch_module.inference_mode():
-                    result = model.transcribe(
-                        audio=str(wav_path),
-                        context=args.context,
-                        language=args.language,
-                        return_time_stamps=True,
-                    )[0]
+                result = transcribe_chunk(
+                    model,
+                    torch_module,
+                    wav_path,
+                    args.context,
+                    args.language,
+                )
             inference_elapsed = time.monotonic() - inference_started
             performance.record(segment.audio_duration, inference_elapsed)
             if result.language and result.language not in languages:
@@ -1450,8 +1620,14 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
             )
 
         console.pass_start(2, "Model availability", "checking/downloading both required models")
-        asr_path = ensure_model_snapshot(ASR_REPOSITORY, cache_dir, console)
-        aligner_path = ensure_model_snapshot(ALIGNER_REPOSITORY, cache_dir, console)
+        asr_repository, aligner_repository, use_mlx = model_repositories(args.device)
+        if use_mlx:
+            console.info(
+                "Apple Silicon detected; using native MLX 8-bit snapshots for "
+                "Qwen3-ASR-1.7B and Qwen3-ForcedAligner-0.6B"
+            )
+        asr_path = ensure_model_snapshot(asr_repository, cache_dir, console)
+        aligner_path = ensure_model_snapshot(aligner_repository, cache_dir, console)
 
         console.pass_start(3, "Recursive discovery", "including nested directories named subs")
         paths = discover_videos(root)
@@ -1484,14 +1660,23 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         )
 
         console.pass_start(5, "Runtime loading", "placing ASR and aligner on the fastest device")
-        model, torch_module, device_map = load_qwen_pipeline(
-            asr_path,
-            aligner_path,
-            args.device,
-            args.max_new_tokens,
-            args.status_interval,
-            console,
-        )
+        if use_mlx:
+            model, torch_module, device_map = load_mlx_pipeline(
+                asr_path,
+                aligner_path,
+                args.max_new_tokens,
+                args.status_interval,
+                console,
+            )
+        else:
+            model, torch_module, device_map = load_qwen_pipeline(
+                asr_path,
+                aligner_path,
+                args.device,
+                args.max_new_tokens,
+                args.status_interval,
+                console,
+            )
 
         console.pass_start(6, "Transcription", "writing each stem.srt after every completed chunk")
         performance = PerformanceTracker()
