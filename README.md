@@ -77,7 +77,7 @@ get_subs "/path/to/videos" --overwrite
 get_subs "/path/to/videos" --device mps
 
 # Cap decoder work for an especially slow/fast-speech workload.
-get_subs "/path/to/videos" --max-new-tokens 1024
+get_subs "/path/to/videos" --max-new-tokens 512
 
 # See every tuning option.
 get_subs --help
@@ -111,7 +111,7 @@ portable Transformers backend is used because timestamp generation requires the
 forced aligner alongside ASR.
 
 `--max-new-tokens` limits how much text Qwen may decode for one chunk. The
-default 1,024 tokens covers ordinary 90-second speech while bounding inference
+default 512 tokens covers ordinary 90-second speech while bounding inference
 time; raise it for unusually dense or very fast speech, or lower it when
 latency matters more than completeness.
 

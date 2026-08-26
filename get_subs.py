@@ -327,9 +327,9 @@ def parse_arguments(argv: Optional[Sequence[str]] = None) -> argparse.Namespace:
     parser.add_argument(
         "--max-new-tokens",
         type=int,
-        default=1024,
+        default=512,
         metavar="COUNT",
-        help="Maximum ASR decoder tokens per chunk (default: 1024).",
+        help="Maximum ASR decoder tokens per chunk (default: 512).",
     )
     parser.add_argument(
         "--overwrite",
